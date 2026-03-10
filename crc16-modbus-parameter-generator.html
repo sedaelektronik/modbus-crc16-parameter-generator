@@ -81,31 +81,91 @@
             background: rgba(0, 212, 255, 0.1);
             padding: 15px;
             border-radius: 10px;
-            text-align: center;
-            font-size: 16px;
+            font-size: 15px;
             transition: all 0.3s ease;
         }
         .result-container.error {
             background: rgba(255, 75, 75, 0.1);
             color: #ff4b4b;
         }
-        #result {
+        .result-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        .result-row:last-child {
+            margin-bottom: 0;
+        }
+        .result-label {
+            color: #b0b0b0;
+            font-size: 13px;
+        }
+        .result-value {
             color: #00d4ff;
             font-weight: bold;
+            font-family: monospace;
+            font-size: 15px;
+            letter-spacing: 1px;
+        }
+        .full-frame {
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid rgba(255,255,255,0.1);
+        }
+        .full-frame .result-value {
+            font-size: 13px;
+            word-break: break-all;
+        }
+        .copy-btn {
+            background: rgba(0, 212, 255, 0.15);
+            border: 1px solid rgba(0, 212, 255, 0.3);
+            color: #00d4ff;
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: background 0.2s;
+            flex-shrink: 0;
+            margin-left: 10px;
+        }
+        .copy-btn:hover {
+            background: rgba(0, 212, 255, 0.3);
+            transform: none;
+        }
+        #copyMsg {
+            font-size: 11px;
+            color: #00ffaa;
+            text-align: center;
+            height: 14px;
+            margin-top: 6px;
         }
     </style>
 </head>
 <body>
     <div class="container">
         <h2>Modbus CRC16 Calculator</h2>
-        <label for="inputText">Hex İnput (Example: 01031000 or 01 03 10 00)</label>
-        <input type="text" id="inputText" placeholder="Enter hex value">
+        <label for="inputText">Hex Input — son 2 byte CRC placeholder olmalı (örn: 01 05 02 05 00 32 00 00)</label>
+        <input type="text" id="inputText" placeholder="Hex değer girin (örn: 01 05 02 05 00 32 00 00)">
         <div class="button-group">
             <button onclick="calculateCRC('big')">Big Endian</button>
             <button onclick="calculateCRC('little')">Little Endian</button>
         </div>
-        <div class="result-container">
-            Result: <span id="result"></span>
+        <div class="result-container" id="resultContainer">
+            <div class="result-row">
+                <span class="result-label">CRC16:</span>
+                <span class="result-value" id="result">—</span>
+            </div>
+            <div class="full-frame" id="fullFrameRow" style="display:none;">
+                <div class="result-row">
+                    <span class="result-label">Tam Frame:</span>
+                    <div style="display:flex; align-items:center; flex-wrap:wrap; gap:4px; justify-content:flex-end;">
+                        <span class="result-value" id="fullFrame"></span>
+                        <button class="copy-btn" onclick="copyFrame()">Kopyala</button>
+                    </div>
+                </div>
+                <div id="copyMsg"></div>
+            </div>
         </div>
     </div>
 
@@ -114,8 +174,10 @@
             let crc = 0xFFFF;
             let mesaj = document.getElementById("inputText").value.trim().toUpperCase();
             let resultElement = document.getElementById("result");
-            let resultContainer = document.querySelector(".result-container");
+            let resultContainer = document.getElementById("resultContainer");
+            let fullFrameRow = document.getElementById("fullFrameRow");
 
+            // Boşlukları ve 0x prefix'leri temizle
             let mesajTemiz = "";
             for (let j = 0; j < mesaj.length; j++) {
                 if (mesaj.substring(j, j + 2) === "0X") {
@@ -126,19 +188,28 @@
             }
 
             if (mesajTemiz.length % 2 !== 0) {
-                resultElement.textContent = "Result: Error: Input is not a complete byte!";
+                resultElement.textContent = "Hata: Eksik byte!";
                 resultContainer.classList.add("error");
+                fullFrameRow.style.display = "none";
                 return;
-            } else {
-                resultContainer.classList.remove("error");
             }
 
-            let mesajBoyu = mesajTemiz.length - 4;
+            if (mesajTemiz.length < 6) {
+                resultElement.textContent = "Hata: En az 3 byte gerekli!";
+                resultContainer.classList.add("error");
+                fullFrameRow.style.display = "none";
+                return;
+            }
 
-            for (let k = 0; k < mesajBoyu; k += 2) {
+            resultContainer.classList.remove("error");
+
+            // CRC hesapla: son 2 byte (CRC placeholder) hariç
+            let dataBoyu = mesajTemiz.length - 4;
+
+            for (let k = 0; k < dataBoyu; k += 2) {
                 let mesajByte = mesajTemiz.substring(k, k + 2);
                 let mesajByteSayi = parseInt(mesajByte, 16);
-                
+
                 crc = crc ^ mesajByteSayi;
                 for (let i = 0; i < 8; i++) {
                     if (crc & 0x0001) {
@@ -149,11 +220,41 @@
                 }
             }
 
+            // Endian tipine göre byte sırası
+            let crcByte1, crcByte2;
             if (endianType === "little") {
-                crc = ((crc & 0xFF) << 8) + ((crc & 0xFF00) >> 8);
+                crcByte1 = (crc & 0x00FF).toString(16).toUpperCase().padStart(2, '0');
+                crcByte2 = ((crc & 0xFF00) >> 8).toString(16).toUpperCase().padStart(2, '0');
+            } else {
+                crcByte1 = ((crc & 0xFF00) >> 8).toString(16).toUpperCase().padStart(2, '0');
+                crcByte2 = (crc & 0x00FF).toString(16).toUpperCase().padStart(2, '0');
             }
 
-            resultElement.textContent = crc.toString(16).toUpperCase().padStart(4, '0');
+            resultElement.textContent = crcByte1 + " " + crcByte2;
+
+            // Data byte'larını al (son 2 byte hariç)
+            let dataBytes = [];
+            for (let k = 0; k < dataBoyu; k += 2) {
+                dataBytes.push(mesajTemiz.substring(k, k + 2));
+            }
+
+            // Tam frame: data + hesaplanan CRC
+            let fullFrameStr = [...dataBytes, crcByte1, crcByte2].join(" ");
+            document.getElementById("fullFrame").textContent = fullFrameStr;
+
+            // Input alanını güncelle: son 2 byte = hesaplanan CRC
+            document.getElementById("inputText").value = fullFrameStr;
+
+            fullFrameRow.style.display = "block";
+            document.getElementById("copyMsg").textContent = "";
+        }
+
+        function copyFrame() {
+            let text = document.getElementById("fullFrame").textContent;
+            navigator.clipboard.writeText(text).then(() => {
+                document.getElementById("copyMsg").textContent = "✓ Kopyalandı!";
+                setTimeout(() => document.getElementById("copyMsg").textContent = "", 2000);
+            });
         }
     </script>
 </body>
